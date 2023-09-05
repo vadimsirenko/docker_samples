@@ -1,0 +1,126 @@
+// Создание целевой БД если отсутствует
+CREATE DATABASE temp
+    WITH
+    OWNER = postgres
+    ENCODING = 'UTF8'
+    CONNECTION LIMIT = -1
+    IS_TEMPLATE = False;
+	
+	
+SELECT *  FROM pg_extension;
+
+/* Регистрация расширения temporal_tables - темпоральные таблицы */
+CREATE EXTENSION temporal_tables;
+
+CREATE TABLE subscriptions
+(
+  id SERIAL PRIMARY KEY,
+  state text NOT NULL CHECK (state IN ('trial', 'expired', 'active', 'cancelled')),
+  created_at timestamptz NOT NULL DEFAULT current_timestamp
+);
+
+
+ALTER TABLE subscriptions
+  ADD COLUMN sys_period tstzrange NOT NULL DEFAULT tstzrange(current_timestamp, null);
+  
+  CREATE TABLE subscriptions_history (LIKE subscriptions);
+  
+  CREATE TRIGGER versioning_trigger
+BEFORE INSERT OR UPDATE OR DELETE ON subscriptions
+FOR EACH ROW EXECUTE PROCEDURE versioning(
+  'sys_period', 'subscriptions_history', true
+);
+
+INSERT INTO subscriptions (state, created_at) VALUES ('cancelled', '2015-02-05 12:00:00');
+INSERT INTO subscriptions (state, created_at) VALUES ('active', '2015-03-10 12:00:00');
+
+select * from subscriptions
+
+
+INSERT INTO subscriptions_history (id, state, created_at, sys_period)
+  VALUES (1, 'trial', '2015-01-05 12:00:00',
+    tstzrange('2015-01-05 12:00:00', '2015-01-15 15:00:00')
+  );
+
+INSERT INTO subscriptions_history (id, state, created_at, sys_period)
+  VALUES (1, 'active', '2015-01-05 12:00:00',
+    tstzrange('2015-01-15 15:00:00', (SELECT lower(sys_period) FROM subscriptions WHERE id = 1))
+  );		
+  
+INSERT INTO subscriptions_history (id, state, created_at, sys_period)
+  VALUES (2, 'trial', '2015-01-10 12:00:00',
+    tstzrange('2015-01-10 15:00:00', (SELECT lower(sys_period) FROM subscriptions WHERE id = 2))
+  );
+  
+select * from subscriptions_history					
+							
+ SELECT id, state FROM subscriptions
+    WHERE id = 1 AND sys_period @> '2015-01-10'::timestamptz
+UNION ALL
+  SELECT id, state from subscriptions_history
+    WHERE id = 1 AND sys_period @> '2015-01-10'::timestamptz;
+	
+CREATE VIEW subscriptions_with_history AS
+    SELECT * FROM subscriptions
+  UNION ALL
+    SELECT * FROM subscriptions_history;
+	
+SELECT * FROM subscriptions_with_history
+  WHERE id = 1 AND sys_period @> '2023-04-20 18:58:05'::timestamptz
+  
+
+UPDATE subscriptions SET state = 'active' WHERE id = 1;
+select * from subscriptions where id = 1
+select * from subscriptions_with_history where id = 1
+
+
+CREATE INDEX ON subscriptions USING gist (sys_period);
+CREATE INDEX ON subscriptions_history USING gist (sys_period);
+
+
+-- *****************
+
+CREATE TABLE employees_history
+(
+  name text NOT NULL,
+  department text,
+  salary numeric(20, 2),
+  sys_period tstzrange NOT NULL
+);
+
+CREATE TABLE employees (PRIMARY KEY(name)) INHERITS (employees_history);
+
+
+CREATE TRIGGER employees_versioning_trigger
+BEFORE INSERT OR UPDATE OR DELETE ON employees
+FOR EACH ROW EXECUTE PROCEDURE versioning(
+  'sys_period', 'employees_history', true
+);
+
+insert into employees (name, department, salary)values('Dep1', 'Department 1', 56.67);
+insert into employees (name, department, salary)values('Dep2', 'Department 2', 158.22);
+
+update employees set salary = 100 where name = 'Dep1'
+
+select * from employees;
+select * from employees_history;
+select * from employees_history  WHERE sys_period @> current_timestamp;
+
+ALTER TABLE employees_history
+  ADD COLUMN code varchar(25) NOT NULL DEFAULT '';
+
+update employees_history set code = name; 
+update employees set salary = 200 where name = 'Dep1';
+
+CREATE INDEX ON employees_history USING gist (sys_period);
+
+
+select * from employees_history  WHERE sys_period @> current_timestamp;
+select * from ONLY employees_history  WHERE sys_period @> current_timestamp;
+select *, lower(s1.sys_period)::timestamptz as l, upper(s1.sys_period)::timestamptz as u from employees as s1 WHERE sys_period @> current_timestamp;
+
+SET TIME ZONE 'Europe/Moscow';
+select LOCALTIME
+
+
+select * from employees_history where tstzrange('2023-04-20 13:01:30.040607+03', '2023-04-20 13:01:54.040607+03') && sys_period order by name, sys_period

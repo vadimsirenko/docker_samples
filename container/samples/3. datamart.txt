@@ -1,0 +1,11 @@
+-- Внешний Postgres
+SELECT  * FROM ksu_nsi.oilproduct;
+SELECT  * FROM ksu_nsi.oilproduct where id = 3;
+update ksu_nsi.oilproduct set sname ='Масло И-50А 1000 л' where id = 3
+
+-- Внешний MS SQL  = spb25-cce-d-db2
+SELECT  * FROM nsi."vRailStations" where "StationCode" like '034%';
+
+-- Представление со ссылкой на таблицу внутри БД
+select * from ksu_nsi.transptype
+update ksu_nsi.transptype set scode =  '07' where id = 1;

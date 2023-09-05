@@ -1,0 +1,65 @@
+// Создание тестовой БД
+CREATE DATABASE master
+    WITH
+    OWNER = postgres
+    ENCODING = 'UTF8'
+    CONNECTION LIMIT = -1
+    IS_TEMPLATE = False;
+	
+// Создание тестовой схемы в БД master
+CREATE SCHEMA ksu_nsi
+    AUTHORIZATION postgres;
+	
+// Создание тестовой таблицы
+CREATE TABLE ksu_nsi.oilproduct (		
+	 id integer NOT NULL,
+      scode character varying(25) NOT NULL,
+    sname character varying(100)  NOT NULL,
+    sname_full character varying(500) NOT NULL,
+    stype_oilproduct character varying(25) NOT NULL,
+    productasvcode bigint NOT NULL,
+    createdate timestamp without time zone NOT NULL
+);
+// Скопировать каталог import в каталог образа Postgres /home
+// Импорт данных
+--command " "\\copy ksu_nsi.oilproduct (id, scode, sname, sname_full, stype_oilproduct, productasvcode, createdate) FROM '/home/import/oil_product.csv' DELIMITER '|' CSV HEADER ENCODING 'UTF8' QUOTE '$';""
+
+// Создание целевой БД
+CREATE DATABASE datamart
+    WITH
+    OWNER = postgres
+    ENCODING = 'UTF8'
+    CONNECTION LIMIT = -1
+    IS_TEMPLATE = False;
+	
+// Регистрация расширения postgres_fdw - работа с прилинкованным или другой базой Postgres
+CREATE EXTENSION postgres_fdw;
+
+// Создание линка на сервре и базу Postgres
+CREATE SERVER local_postgres_master
+        FOREIGN DATA WRAPPER postgres_fdw
+        OPTIONS (host 'postgres', port '5432', dbname 'master');
+		
+// Создание пользователя на пользователя внешнего сервера Postgres
+CREATE USER MAPPING FOR postgres
+        SERVER local_postgres_master
+        OPTIONS (user 'postgres', password 'postgres');
+		
+// Создание схемы в целевой БД 
+CREATE SCHEMA ksu_nsi AUTHORIZATION postgres;
+
+// Создание таблицы, которая смотрит на другой Postgers
+CREATE FOREIGN TABLE ksu_nsi.oilproduct (	
+	 id integer NOT NULL,
+      scode character varying(25) COLLATE pg_catalog."default" NOT NULL,
+    sname character varying(100) COLLATE pg_catalog."default" NOT NULL,
+    sname_full character varying(500) COLLATE pg_catalog."default" NOT NULL,
+    stype_oilproduct character varying(25) COLLATE pg_catalog."default" NOT NULL,
+    productasvcode bigint NOT NULL,
+    createdate timestamp without time zone NOT NULL
+)
+        SERVER local_postgres_master
+        OPTIONS (schema_name 'ksu_nsi', table_name 'oilproduct');
+
+// Выполнение запроса к внешнему Postgres через текущую базу и FOREIGN таблицу
+select * from ksu_nsi.oilproduct

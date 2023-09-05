@@ -1,0 +1,150 @@
+***** На MS SQL 
+
+// Cоздать БД testdb и таблицу items
+USE [master]
+GO
+
+CREATE DATABASE [testdb];
+create table dbo.items 
+(
+	id int identity (1,1), 
+	name varchar(255),
+	ts datetime2 default getdate()
+);
+// Тестовые данные
+insert items(name) values ('Лето'),('Зима'),('Весна'),('Осень')
+select * from items
+
+// Создать пользователя user (PASSWORD=N'P@ssw0rd') с правами на БД testdb
+USE [master]
+GO
+CREATE LOGIN [user] WITH PASSWORD=N'P@ssw0rd', DEFAULT_DATABASE=[master], CHECK_EXPIRATION=OFF, CHECK_POLICY=OFF
+GO
+USE [testdb]
+GO
+CREATE USER [user] FOR LOGIN [user]
+GO
+USE [testdb]
+GO
+ALTER ROLE [db_owner] ADD MEMBER [user]
+GO
+
+
+/////// Теперь на Postgres
+
+// Создание целевой БД если отсутствует
+CREATE DATABASE datamart
+    WITH
+    OWNER = postgres
+    ENCODING = 'UTF8'
+    CONNECTION LIMIT = -1
+    IS_TEMPLATE = False;
+
+SELECT *  FROM pg_extension;
+
+/* Регистрация расширения tds_fdw - работа с прилинкованным MS SQL */
+CREATE EXTENSION tds_fdw;
+
+-- Дополнительно нужно зарегистрировать сервер MS SQL
+-- Для этого открываем файл с freetds.conf в каталоге /etc/freetds/
+-- и добавляем новые регистрации MS SQL серверов
+****************
+[MSSQL2019]
+        host = mssql
+        port = 1433
+        tds version = 7.3
+        instance = MSSQL2019
+[SPB25-CCE-D-DB2]
+        host = 10.61.132.181
+        port = 1433
+        tds version = 7.3
+        instance = SPB25-CCE-D-DB2
+********************
+-- готовый файл в каталоге container\freetds дистрибутива
+
+-- Так же для работы с типом datetime2 прилинкованного сервера MS SQL 
+-- потребуется прописать формат даты. Создать файл locales.conf в каталоге /etc/freetds/
+-- с содержимым
+********************
+[default]
+        date format = %b %e %Y %I:%M:%S.%z%p
+********************
+-- готовый файл в каталоге container\freetds дистрибутива
+
+-- после редактирования файлов потребуется перезапустить контейнер с Postgres
+
+
+SELECT *  FROM pg_extension;
+
+// Создаем линк на MS SQL
+CREATE SERVER sql01 FOREIGN DATA WRAPPER tds_fdw
+    OPTIONS (servername 'mssql2019', database 'testdb', msg_handler 'notice');
+	
+// Создание пользователя на пользователя внешнего сервера MS SQL	
+CREATE USER MAPPING FOR postgres SERVER sql01 OPTIONS (username 'user', password 'P@ssw0rd');
+
+// Создаем схему для зеркалирования таблиц MS SQL
+CREATE SCHEMA IF NOT EXISTS ms_dbo AUTHORIZATION postgres;
+
+// Создаем зеркала таблиц MS SQL из БД testdb , схемы dbo
+IMPORT FOREIGN SCHEMA dbo FROM SERVER sql01
+    INTO ms_dbo
+    OPTIONS (import_default 'false');
+	
+// Как вариант можно зеркалировать конкретную таблицу	
+CREATE FOREIGN TABLE IF NOT EXISTS ms_dbo.items(
+    id integer OPTIONS (column_name 'id') NOT NULL,
+    name character varying(255) OPTIONS (column_name 'name') NULL COLLATE pg_catalog."default",
+    ts timestamp(6) without time zone OPTIONS (column_name 'ts') NULL
+)
+    SERVER sql01
+    OPTIONS (schema_name 'dbo', table_name 'items');
+
+// Создание подобной таблицы в БД datamart
+create table public.items (id serial primary key, name varchar(255));
+insert into public.items(name) values ('Лето'),('Зима'),('Весна'),('Осень'),('Не то ни сё');
+SELECT id, name FROM public.items;
+
+
+SELECT p.id, p.name, m.id, m.name
+	FROM public.items as p
+		left join ms_dbo.items as m on m.id = p.id
+where p.id in ( 1, 3, 4);
+
+SELECT * FROM ms_dbo.items 
+where id between 1 and 3
+
+
+// Создание линк на MS SQL  SPB25-CCE-D-DB2
+CREATE SERVER D_DB2 FOREIGN DATA WRAPPER tds_fdw
+    OPTIONS (servername 'SPB25-CCE-D-DB2', database 'cue_scm_DataMart', msg_handler 'notice');
+	
+CREATE USER MAPPING FOR postgres SERVER D_DB2 OPTIONS (username 'pg_tws', password 'P@ssw0rd');
+
+CREATE SCHEMA IF NOT EXISTS ms_cue_scm_datamart AUTHORIZATION postgres;
+
+
+IMPORT FOREIGN SCHEMA mplv FROM SERVER D_DB2
+    INTO ms_cue_scm_datamart
+    OPTIONS (import_default 'false');
+
+SELECT * FROM ms_cue_scm_datamart."vPump";
+
+CREATE SCHEMA IF NOT EXISTS nsi AUTHORIZATION postgres;
+CREATE SCHEMA IF NOT EXISTS ms_nsi_cue_scm_datamart AUTHORIZATION postgres;
+
+IMPORT FOREIGN SCHEMA nsi FROM SERVER D_DB2
+    INTO ms_nsi_cue_scm_datamart
+    OPTIONS (import_default 'false');
+	
+create view nsi."vRailStations"
+as
+SELECT "Id", "StationCode", "StationCodeGroup", "StationName", "StationName2", "RailRoadCode", "RailRoadName", "RailRoadName2", "RegionCode", "RegionName", "StationStatus", "StationLatitude", "StationLongitude", "SysStartTime", "SysEndTime"
+	FROM ms_nsi_cue_scm_datamart."vRailStations";
+	
+	
+CREATE SCHEMA IF NOT EXISTS ksu_nsi AUTHORIZATION postgres;
+SELECT "RefineryId", "RefineryName", "ShipmentTypeId", "ShipmentTypeName", "ShipmentTypeFullName"
+into ksu_nsi.transptype
+	FROM ms_nsi_cue_scm_datamart."vTransport";
+

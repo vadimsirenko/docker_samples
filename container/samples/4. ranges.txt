@@ -1,0 +1,20 @@
+--common
+
+CREATE TABLE employees_history
+(
+  name text NOT NULL,
+  department text,
+  salary numeric(20, 2),
+  sys_period tstzrange NULL
+);
+
+
+insert into employees_history (name, department, salary, sys_period)values('Dep1', 'Department 1', 56.67, '[2010-01-01 14:00, 2010-01-01 15:00)');
+insert into employees_history (name, department, salary, sys_period)values('Dep2', 'Department 2', 158.22, '[2021-12-30 15:00:00,infinity)');
+insert into employees_history (name, department, salary, sys_period)values('Dep3', 'Department 3', 76.58, tstzrange('2023-04-20 13:01:30.040607+03', current_timestamp));
+insert into employees_history (name, department, salary, sys_period)values('Dep4', 'Department 4', 33.97, tstzrange('2020-04-13 13:01:30.040607+03', null ));
+
+
+select * from employees_history where tstzrange('2023-04-20 13:01:30.040607+03', '2023-04-20 13:01:54.040607+03') && sys_period
+
+// подробнее https://postgrespro.ru/docs/postgresql/15/rangetypes
